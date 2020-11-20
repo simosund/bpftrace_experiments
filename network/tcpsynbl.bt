@@ -1,0 +1,23 @@
+#!/usr/bin/env bpftrace
+
+#include <net/sock.h>
+
+BEGIN
+{
+  printf("Tracing SYN backlog size. Ctrl-C to end.\n");
+}
+
+kprobe:tcp_v4_syn_recv_sock,
+kprobe:tcp_v6_syn_recv_sock
+{
+  $sock = (struct sock *)arg0;
+  @backlog[$sock->sk_max_ack_backlog & 0xffffffff] = hist($sock->sk_ack_backlog); //0xffffffff to solve cast to int problem
+  if ($sock->sk_ack_backlog > $sock->sk_max_ack_backlog) {
+    time("%H:%M:%S dropping a SYN.\n");
+  }
+}
+
+END
+{
+  printf("\n@backlog[backlog limit]: histogram of backlog size\n");
+}

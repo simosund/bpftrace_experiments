@@ -1,0 +1,34 @@
+#!/usr/bin/env bpftrace
+
+#include <net/sock.h>
+
+BEGIN
+{
+  printf("Tracking socket connect/accepts. Ctrl-C to end\n");
+  // from include/uapi/linux/in.h
+  @prot2str[IPPROTO_IP] = "IPPROTO_IP";
+  @prot2str[IPPROTO_ICMP] = "IPPROTO_ICMP";
+  @prot2str[IPPROTO_TCP] = "IPPROTO_TCP";
+  @prot2str[IPPROTO_UDP] = "IPPROTO_UDP";
+}
+
+// I added separate code-block for the accept kprobe, so that it would be added to accept map instead of connect map
+kprobe:security_socket_accept
+{
+  $sock = (struct socket *)arg0;
+  $protocol = $sock->sk->sk_protocol & 0xff;
+  @accept[comm, $protocol, @prot2str[$protocol], $sock->sk->__sk_common.skc_prot->name] = count();
+}
+
+kprobe:security_socket_connect
+{
+  $sock = (struct socket *)arg0;
+  $protocol = $sock->sk->sk_protocol & 0xff;
+  @connect[comm, $protocol, @prot2str[$protocol], $sock->sk->__sk_common.skc_prot->name] = count();
+}
+
+END
+{
+  clear(@prot2str);
+}
+    

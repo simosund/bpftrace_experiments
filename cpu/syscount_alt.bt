@@ -1,0 +1,7 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:raw_syscalls:sys_enter
+{
+	@syscall[ksym(*(kaddr("sys_call_table") + (uint64)args->id*8))] = count();
+	@comm[comm] = count();
+}

@@ -1,0 +1,31 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("Tracing icache lookups... Hit Ctrl-C to end\n");
+  printf("%10s %10s %5s\n", "REFS", "Misses", "HIT%");
+}
+
+kretprobe:find_inode_fast* // For me, function is instead find_inode_fast.isra.0, so star it to make it match any isra version
+{
+  @refs++;
+  if (retval == 0)
+    {
+      @misses++;
+    }
+}
+
+interval:s:1
+{
+  $hits = @refs - @misses;
+  $percent = @refs > 0 ? 100 * (uint64)$hits / (uint64)@refs : 0;
+  printf("%10d %10d %4d%%\n", @refs, @misses, $percent);
+  clear(@refs);
+  clear(@misses);
+}
+
+END
+{
+  clear(@refs);
+  clear(@misses);
+}

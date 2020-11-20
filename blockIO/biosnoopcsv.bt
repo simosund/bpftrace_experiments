@@ -1,0 +1,33 @@
+#!/usr/bin/env bpftrace
+
+#include<linux/blkdev.h>
+
+BEGIN
+{
+  printf("completion_time,direction,latency\n");
+}
+
+kprobe:blk_mq_start_request
+{
+  @start[arg0] = nsecs;
+}
+
+kprobe:blk_account_io_completion
+/@start[arg0]/
+{
+  $latency = (nsecs - @start[arg0]) / 1000;
+  $elapsed = elapsed / 1000;
+  // Calculation of direction based on BCC biosnoop
+  //(cmd_flags & REQ_OP_MASK) == REQ_OP_WRITE, based on values in linux/blk_types.h, kernel dependant
+  $req = (struct request *)arg0;
+  $direction = ($req->cmd_flags & (1 << 8) - 1) == 1 ? "W" : "R";
+  printf("%d.%06d,%s,%d.%03d\n", $elapsed / 1000000, $elapsed % 1000000,
+	 $direction, $latency / 1000, $latency % 1000);
+  delete(@start[arg0]);
+}
+
+END
+{
+  clear(@start);
+}
+

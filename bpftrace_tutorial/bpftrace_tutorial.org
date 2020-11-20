@@ -1,0 +1,236 @@
+#+TITLE: bpftrace Introduction
+#+AUTHOR: Simon Sundberg
+
+#+REVEAL_INIT_OPTIONS: width:1400, heigth:900, margin:0.1, slideNumber: "c/t"
+#+OPTIONS: toc:nil, reveal_single_file:t
+# #+REVEAL_EXTRA_CSS: ./smaller_text.css
+
+* Outline
+# Disabled Org's automatic Table of Contents to be able to insert slide breakpoint
+# Automatically genereated using M-x org-reveal-manual-toc
+  - [[Basic Syntax][Basic Syntax]]
+    - [[Structure][Structure]]
+    - [[Variables][Variables]]
+    - [[Flow control][Flow control]]
+      - [[If-statements][If-statements]]
+      - [[Tenary operators][Tenary operators]]
+      - [[Loops][Loops]]
+  - [[Probe types][Probe types]]
+#+REVEAL: split
+  - [[Built-in variables][Built-in variables]]
+    - [[Basic built-ins][Basic built-ins]]
+    - [[Command-line arguments][Command-line arguments]]
+    - [[Function arguments - kprobes/uprobes][Function arguments - kprobes/uprobes]]
+    - [[Function arguments - tracepoints][Function arguments - tracepoints]]
+  - [[Built-in functions][Built-in functions]]
+    - [[Basic functions][Basic functions]]
+    - [[Map functions][Map functions]]
+  - [[Examples - one liners][Examples - one liners]]
+  - [[Examples - slighty more complex][Examples - slighty more complex]]
+  - [[Resources][Resources]]
+
+* Basic Syntax
+** Structure
+- The basic format of a bpftrace program is very simple and similar to awk
+#+BEGIN_SRC bpftrace
+probe /filter/ {action-block}
+   .
+   .
+   .
+probe /filter/ {action-block}
+#+END_SRC
+
+- Example:
+#+BEGIN_SRC bpftrace
+BEGIN { printf("Hello World\n"); exit(); }
+#+END_SRC
+
+** Variables
+- There are two types of variables
+#+BEGIN_SRC bpftrace
+BEGIN
+{
+  $a = 1;              //a scratch-variable (local)
+  @b = 2;              //a map (global)
+  @c["key"] = "value"; //a key-value map (global)
+  @d["tuple", 3] = 17; //a key-value map with a sequence key
+  exit();
+}
+END
+{
+                                                   //$a does not exist
+  printf("%d\n", @b);                              //prints "2"
+  printf("<%s> %d\n", @c["key"], @d["tuple", 3]);  //prints "<value> 17"
+  printf("<%s> %d\n", @c["miss"], @d["tuple", 1]); //prints "<> 0"
+}
+#+END_SRC
+- There are also built-in variables (more on that later)
+** Operators
+- You have the typical math operators
+  - +, -, *, /, % (only for integers though)
+- Bitwise operators
+  - &, |, ^, <<, >>
+- Boolean operators
+  - &&, ||, !
+** Flow control
+*** If-statements
+- You have pretty bog-standard if-else statements
+#+BEGIN_SRC bpftrace
+if ($a > $b) {
+   printf("a is bigger\n");
+} else {
+   printf("b is bigger (or equal)\n");
+}
+#+END_SRC
+- No else-if though, so have to nestle multiple if-statements if necessary
+*** Tenary operators
+- You have the standard tenary expression
+#+BEGIN_SRC bpftrace
+$c = a > b ? "bigger" : "smaller";
+#+END_SRC
+*** Loops
+- You don't have true loops (verifier needs to be sure that program halts)
+- But you do have support for "unrolling loops"
+#+BEGIN_SRC bpftrace
+// prints "0 1 2 3 4"
+$i = 0;
+unroll(5) {
+   printf("%d ", $i);
+   $i += 1;
+}
+#+END_SRC
+
+* Probe types
+- There are several different types of probes:
+  - *BEGIN*: Runs once at start of program
+  - *END*: Runs once at end of program
+  - *tracepoint*: Kernel tracepoint (static)
+  - *kprobe* and *kretprobe*: Probe for kernel functions (dynamic)
+  - *usdt*: User defined tracepoint (static)
+  - *uprobe* and *uretprobe*: Probe for user-level functions (dynamic)
+  - *software*: Software events
+  - *hardware*: Hardware events
+  - *profile*: Periodic events (useful for sampling, fires on every cpu)
+  - *interval*: Periodic events (useful for output, fires on one cpu)
+** How to find probes?
+- You can list probes with bpftrace -l
+#+BEGIN_SRC shell
+$ sudo bpftrace -l 'hardware:*'
+
+hardware:backend-stalls:
+hardware:branch-instructions:
+hardware:branch-misses:
+hardware:bus-cycles:
+hardware:cache-misses:
+hardware:cache-references:
+hardware:cpu-cycles:
+hardware:frontend-stalls:
+hardware:instructions:
+hardware:ref-cycles:
+#+END_SRC
+* Built-in variables
+** Basic built-ins
+- There are several built in variables
+  - *pid*: Process-id
+  - *tid*: Thread-id
+  - *comm*: Name of current process
+  - *cpu*: CPU-core
+  - *kstack/ustack*: Kernel/userspace call-stack (as a string)
+  - *probe*: Name of probe that fired (useful if using wild-cards)
+  - *curtask*: Current task\under{}struct (see linux/sched.h for definition)
+** Command-line arguments
+- You can access command line arguments in bpftrace programs
+- Are accessible through $1, $2, ..., $N
+- Ex: 
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 'BEGIN { printf("%s %d\n", str($1), $2); exit(); }' "Hello" 17
+#+END_SRC
+** Function arguments - kprobes/uprobes
+- You can access varaibles from traced uprobes/kprobes through arg0, arg1, ..., argN
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 'k:do_sys_open { printf("%s\n", str(arg1)); }'
+#+END_SRC
+** Function arguments - tracepoints
+
+- You can access variables from traced tracepoints through args
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 't:syscalls:sys_enter_openat { printf("%s\n", str(args->filename)); }'
+#+END_SRC
+- You can find the arguments using bpftrace -lv
+#+BEGIN_SRC shell
+$ sudo bpftrace -lv 'tracepoint:syscalls:sys_enter_openat'
+
+tracepoint:syscalls:sys_enter_openat
+    int __syscall_nr;
+    int dfd;
+    const char * filename;
+    int flags;
+    umode_t mode;
+#+END_SRC
+* Built-in functions
+** Basic functions
+- There are several built-in functions
+  - *printf(fmt, [arg,...])*: Prints out a formated string
+  - *time([fmt])*: Prints out the current time
+  - *print(map)*: Prints out a map variable (automatically done at end of program)
+  - *str(ptr, [n])*: Returns the string ptr points at
+  - *ksym(ptr)/usym(ptr)*: Get's the kernel/user symbol name at ptr
+
+** Map functions
+- There are also some built in functions used to store values in maps
+  - *count()*: Increments with 1 each time called
+  - *hist(value)*: Store in a power-of-2 histogram
+  - *lhist(value, min, max, step)*: Store in a linear histogram
+  - *delete(map[key])*: Delete a key-value pair from the map
+  - *clear(map)*: Delete all key-value pairs from map
+  - *sum(), avg(), min(), max()*: Get the sum/average/min/max
+
+* Examples - one liners
+- Trace opened files
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 't:syscalls:sys_enter_openat { printf("%s -> %s\n", comm, str(args->filename)); }'
+#+END_SRC
+- Count system calls of different types
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 't:syscalls:sys_enter* { @[probe] = count(); }'
+#+END_SRC
+- Get distribution of read-size
+#+BEGIN_SRC shell
+$ sudo bpftrace -e 't:syscalls:sys_exit_read { @bytes = hist(args->ret); }'
+#+END_SRC
+
+* Examples - slighty more complex
+#+REVEAL_HTML: <div style="font-size: 75%;">
+#+BEGIN_SRC bpftrace
+#!/usr/bin/env bpftrace
+#include <linux/sched.h>
+
+tracepoint:sched:sched_wakeup,
+tracepoint:sched:sched_wakeup_new
+{
+	@qtime[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+{
+	if (args->prev_state == TASK_RUNNING) {
+		@qtime[args->prev_pid] = nsecs;
+	}
+
+	$ns = @qtime[args->next_pid];
+	if ($ns) {
+		@usecs = hist((nsecs - $ns) / 1000);
+	}
+	delete(@qtime[args->next_pid]);
+}
+
+END
+{
+	clear(@qtime);
+}
+#+END_SRC
+#+REVEAL_HTML: </div>
+
+* Resources
+- [[https://github.com/iovisor/bpftrace/blob/master/docs/reference_guide.md][bpftrace Reference Guide]]
+- [[http://www.brendangregg.com/bpf-performance-tools-book.html][BPF Performance Tools (Book)]]

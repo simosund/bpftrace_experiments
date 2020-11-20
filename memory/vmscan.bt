@@ -1,0 +1,63 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:vmscan:mm_shrink_slab_start { @start_ss[tid] = nsecs; }
+tracepoint:vmscan:mm_shrink_slab_end /@start_ss[tid]/
+{
+  $dur_ss = nsecs - @start_ss[tid];
+  @sum_ss = @sum_ss + $dur_ss;  // @sum_ss = sum($dur_ss);
+  @shrink_slab_ns = hist($dur_ss);
+  delete(@start_ss[tid]);
+}
+
+tracepoint:vmscan:mm_vmscan_direct_reclaim_begin { @start_dr[tid] = nsecs; }
+tracepoint:vmscan:mm_vmscan_direct_reclaim_end /@start_dr[tid]/
+{
+  $dur_dr = nsecs - @start_dr[tid];
+  @sum_dr = @sum_dr + $dur_dr; // @sum_dr = sum($dur_dr);
+  @direct_reclaim_ns = hist($dur_dr);
+  delete(@start_dr[tid]);
+}
+
+tracepoint:vmscan:mm_vmscan_memcg_reclaim_begin { @start_mr[tid] = nsecs; }
+tracepoint:vmscan:mm_vmscan_memcg_reclaim_end /@start_mr[tid]/
+{
+  $dur_mr = nsecs - @start_mr[tid];
+  @sum_mr = @sum_mr + $dur_mr; // @sum_mr = sum($dur_mr);
+  @memcg_reclaim_ns = hist($dur_mr);
+  delete(@start_mr[tid]);
+}
+
+// tracepoint:vmscan:mm_vmscan_wakeup_kswapd { @count_kw = count(); }
+tracepoint:vmscan:mm_vmscan_wakeup_kswapd { @count_kw++; }
+
+// tracepoint:vmscan:mm_vmscan_writepage { @count_wp = count(); }
+tracepoint:vmscan:mm_vmscan_writepage { @count_wp++; }
+
+BEGIN
+{
+  printf("%-10s %10s %12s %12s %6s %9s\n", "Time",
+	 "S-SLABms", "D-RECLAIMms", "M-RECLAIMms", "KSWAPD", "WRITEPAGE");
+}
+
+interval:s:1
+{
+  // Print out header every 20:th line (according to exercise)
+  @linecount += (uint64)1; //Forcing map to be unsigned (the % operator does not like signed types apparently)
+  if (@linecount % 20 == 0) {
+    printf("%-10s %10s %12s %12s %6s %9s\n", "Time",
+	   "S-SLABms", "D-RECLAIMms", "M-RECLAIMms", "KSWAPD", "WRITEPAGE");
+    @linecount = 0;
+  }
+  
+  time("%H:%M:%S");
+  printf("   %10d %12d %12d %6d %9d\n",
+	 @sum_ss / 1000000, @sum_dr / 1000000, @sum_mr / 1000000,
+	 @count_kw, @count_wp);
+  clear(@sum_ss);
+  clear(@sum_dr);
+  clear(@sum_mr);
+  clear(@count_kw);
+  clear(@count_wp);
+}
+
+END { clear(@linecount); } //cleanup

@@ -1,0 +1,27 @@
+#!/usr/bin/env bpftrace
+
+#include<linux/fs.h>
+
+BEGIN
+{
+  printf("Tracing VFS reads and writes... Hit Ctrl-C to end.\n");
+}
+
+kprobe:vfs_read,
+kprobe:vfs_readv,
+kprobe:vfs_write,
+kprobe:vfs_writev
+{
+  @[str(((struct file*)arg0)->f_inode->i_sb->s_type->name), func] = count();
+}
+
+interval:s:1
+{
+  time(); print(@); clear(@);
+}
+
+END
+{
+  clear(@);
+}
+       

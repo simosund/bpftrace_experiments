@@ -1,0 +1,27 @@
+#!/usr/bin/env bpftrace
+
+// Does not use count() because I want to increase by 100 for each (as it only triggers on every 100th event)
+
+hardware:cache-references:100
+{
+	@refs[comm, pid, cpu] += 100; //count();
+	@tot_refs += 100;
+}
+
+hardware:cache-misses:100
+{
+	@misses[comm, pid, cpu] += 100; //count();
+	@tot_misses += 100
+}
+
+END
+{
+	print(@refs);
+	print(@misses);
+	printf("\n\nTotal refs: %d, Total misses: %d\n", @tot_refs, @tot_misses);
+	clear(@refs);
+	clear(@misses);
+	clear(@tot_refs);
+	clear(@tot_misses);
+}
+

@@ -1,0 +1,36 @@
+#!/usr/bin/env bpftrace
+
+   /* Is the nettxlat-dev program from the book (splits histogram per device) */
+
+#include <linux/skbuff.h>
+#include <linux/netdevice.h>
+
+BEGIN
+{
+  printf("Tracing net device xmit queueu latency. Hit Ctrl-C to end.\n");
+}
+
+tracepoint:net:net_dev_start_xmit
+{
+  @start[args->skbaddr] = nsecs;
+}
+
+tracepoint:skb:consume_skb
+/@start[args->skbaddr]/
+{
+  $skb = (struct sk_buff *)(args->skbaddr);
+  @us[$skb->dev->name] = hist((nsecs - @start[args->skbaddr]) / 1000);
+  delete(@start[args->skbaddr]);
+}
+
+//To delete start-entries in case consume_skb misses them
+tracepoint:net:net_dev_queue
+{
+  // avoid timestamp reuse
+  delete(@start[args->skbaddr]);
+}
+
+END
+{
+  clear(@start);
+}

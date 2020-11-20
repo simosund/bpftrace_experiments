@@ -1,0 +1,43 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+	printf("Tracing SMP calls. Hit Ctrl-C to stop\n");
+}
+
+kprobe:smp_call_function_single,
+kprobe:smape_call_function_many
+{
+	@ts[tid] = nsecs;
+	@func[tid] = arg1;
+}
+
+kretprobe:smp_call_function_single,
+kretprobe:smp_call_function_many
+/@ts[tid]/
+{
+	@time_ns[ksym(@func[tid])] = hist(nsecs - @ts[tid]);
+	delete(@ts[tid]);
+	delete(@func[tid]);
+}
+
+kprobe:native_smp_send_reschedule
+{
+	@ts[tid] = nsecs;
+	@func[tid] = reg("ip");
+}
+
+kretprobe:native_smp_send_reschedule
+/@ts[tid]/
+{
+	@time_ns[ksym(@func[tid])] = hist(nsecs - @ts[tid]);
+	delete(@ts[tid]);
+	delete(@func[tid]);
+}
+
+END
+{
+	delete(@ts[tid]);
+	delete(@func[tid]);
+}
+

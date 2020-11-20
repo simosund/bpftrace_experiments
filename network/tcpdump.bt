@@ -1,0 +1,54 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/skbuff.h>
+#include <linux/ip.h>
+#include <linux/tcp.h>
+
+kprobe:tcp_v4_do_rcv
+{
+  $skb = (struct sk_buff *)arg1;
+  $iph = (struct iphdr *)($skb->head + $skb->network_header);
+  $tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+  $saddr = $iph->saddr;
+  $daddr = $iph->daddr;
+  $sport = ($tcph->source >> 8) | (($tcph->source << 8) & 0xff00);
+  $dport = ($tcph->dest >> 8) | (($tcph->dest << 8) & 0xff00);
+  printf("TCPv4 %s:%-5d <- %s:%-5d ", ntop(AF_INET, $daddr), $dport,
+	 ntop(AF_INET, $saddr), $sport);
+  $ack = $tcph->ack_seq;
+  $ack = ($ack >> 24) | (($ack >> 8) & 0xff00) | (($ack << 8) & 0xff0000) | (($ack << 24) & 0xff000000);
+  $seq = $tcph->seq;
+  $seq = ($seq >> 24) | (($seq >> 8) & 0xff00) | (($seq << 8) & 0xff0000) | (($seq << 24) & 0xff000000);
+  printf("ack: %u, seq: %u, ACK:%d, SYN:%d, FIN:%d, size %d\n",
+	 $ack, $seq, $tcph->ack, $tcph->syn, $tcph->fin, $skb->len);
+  $junk = $tcph->ack_seq;
+  $junk = $tcph->seq;
+  $junk = $skb->len;
+
+}
+
+
+kprobe:tcp_v4_send_check
+{
+  $skb = (struct sk_buff *)arg1;
+  $iph = (struct iphdr *)($skb->head + $skb->network_header);
+  $tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+  $saddr = $iph->saddr;
+  $daddr = $iph->daddr;
+  $sport = ($tcph->source >> 8) | (($tcph->source << 8) & 0xff00);
+  $dport = ($tcph->dest >> 8) | (($tcph->dest << 8) & 0xff00);
+  printf("TCPv4 %s:%-5d -> %s:%-5d ", ntop(AF_INET, $saddr), $sport,
+	 ntop(AF_INET, $daddr), $dport);
+    $ack = $tcph->ack_seq;
+  $ack = ($ack >> 24) | (($ack >> 8) & 0xff00) | (($ack << 8) & 0xff0000) | (($ack << 24) & 0xff000000);
+  $seq = $tcph->seq;
+  $seq = ($seq >> 24) | (($seq >> 8) & 0xff00) | (($seq << 8) & 0xff0000) | (($seq << 24) & 0xff000000);
+  printf("ack: %u, seq: %u, ACK:%d, SYN:%d, FIN:%d, size %d\n",
+	 $ack, $seq, $tcph->ack, $tcph->syn, $tcph->fin, $skb->len);
+  $junk = $tcph->ack_seq;
+  $junk = $tcph->seq;
+  $junk = $skb->len;
+
+}
+
+

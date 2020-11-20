@@ -1,0 +1,19 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:vmscan:mm_vmscan_direct_reclaim_begin /$1 && pid==(uint64)$1/ { @start[tid] = nsecs }
+tracepoint:vmscan:mm_vmscan_direct_reclaim_end /@start[tid]/
+{
+  $dur = nsecs - @start[tid];
+  printf("%12d %-15s %-5d %-5d %5d\n", elapsed / 1000, comm, pid, $dur / 1000, (uint64)(args->nr_reclaimed));
+  delete(@start[tid]);
+}
+
+BEGIN
+{
+  printf("%12s %-15s %-5s %-5s %-5s\n", "TIME(us)", "COMM", "PID", "LAT(us)", "PAGES");
+}
+
+END
+{
+  clear(@start);
+}

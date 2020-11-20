@@ -1,0 +1,40 @@
+#!/usr/bin/env bpftrace
+
+   /* Prints a simple callstack of a python program */
+
+#define MAX_INDENT 10
+
+usdt:/usr/bin/python3:python:function__entry
+{
+  @depth++;
+  $t = elapsed;
+  printf("%5d:%09d", $t / 1000000000, $t % 1000000000);
+  $i = 0;
+  unroll (10) {
+    if ($i < @depth) {
+      printf(" ");
+    }
+    $i++;
+  }
+  printf("> %s:%s:%d (%d)\n", str(arg0), str(arg1), arg2, @depth);
+}
+
+usdt:/usr/bin/python3:python:function__return
+{
+  $t = elapsed;
+  printf("%5d:%09d", $t / 1000000000, $t % 1000000000);
+  $i = 0;
+  unroll (10) {
+    if ($i < @depth) {
+      printf(" ");
+    }
+    $i++;
+  }
+  printf("< %s:%s:%d (%d)\n", str(arg0), str(arg1), arg2, @depth);
+  @depth--;
+}
+  
+END
+{
+  clear(@depth);
+}

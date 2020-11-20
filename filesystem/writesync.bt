@@ -1,0 +1,27 @@
+#!/usr/bin/env bpftrace
+
+#include<linux/fs.h>
+#include<asm-generic/fcntl.h>
+
+BEGIN
+{
+  printf("Tracing VFS write sync flags... Hit Ctrl-C to end.\n");
+}
+
+kprobe:vfs_write,
+kprobe:vfs_writev
+{
+  $file = (struct file *)arg0;
+  $name = $file->f_path.dentry->d_name.name;
+  if ((($file->f_inode->i_mode >> 12) & 15) == DT_REG)
+    {
+      if ($file->f_flags & O_DSYNC)
+	{
+	  @sync[comm, str($name)] = count();
+	}
+      else
+	{
+	  @regular[comm, str($name)] = count();
+	}
+    }
+}

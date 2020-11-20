@@ -1,0 +1,12 @@
+#!/usr/bin/env bpftrace
+
+
+BEGIN
+{
+	printf("%-15s %-5s %-5s\n", "COMM", "PID", "TID");
+}
+
+tracepoint:sched:sched_process_exit
+{
+	printf("%-15s %-5d %-5d\n", args->comm, args->pid, tid);
+}

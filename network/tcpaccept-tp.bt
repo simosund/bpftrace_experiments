@@ -1,0 +1,22 @@
+#!/usr/bin/env bpftrace
+
+   /* Version of tcpaccect using the sock:inet_sock_set_state tracepoint instead */
+
+#include <net/tcp_states.h>
+#include <linux/socket.h>
+
+BEGIN
+{
+  printf("%-8s %-3s %-14s %-5s %-14s %-5s\n", "TIME", "IP",
+	 "RADDR", "RPORT", "LADDR", "LPORT");
+}
+
+tracepoint:sock:inet_sock_set_state
+/(uint64)args->oldstate == TCP_SYN_RECV && (uint64)args->newstate == TCP_ESTABLISHED/
+{
+  time("%H:%M:%S ");
+  printf("%-3d %-14s %-5d %-14s %-5d\n", args->family == AF_INET ? 4 : 6,
+	 ntop(args->family, args->daddr), args->dport,
+	 ntop(args->family, args->saddr), args->sport);
+}
+

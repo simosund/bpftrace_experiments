@@ -1,0 +1,104 @@
+#!/usr/bin/env bpftrace
+
+   /*
+    * Measures CPU-utalization (instead of estimating it from sampling it calculates actual on-CPU time)
+    * Only intended as a toy example, a very inefficent way to measure CPU-utalization
+    * (has high overhead due to tracing the context switches of the scheduler)
+    */
+#include <linux/sched.h>
+
+BEGIN
+{
+  @first_t = nsecs;
+  @last_t = @first_t;
+}
+
+tracepoint:sched:sched_switch
+{
+  $t = nsecs;
+  $prev_t = @start[cpu, tid];
+  
+  if (pid != 0 && $prev_t > 0)
+    {
+      @on_cpu[cpu] += ($t - $prev_t);
+    }
+  delete(@start[cpu, tid]);
+  @start[cpu, args->next_pid] = $t;
+  @ctx_switch[cpu] += 1;
+}
+
+
+interval:s:1
+{
+  $t = nsecs;
+  $t_diff = $t - @last_t;
+
+  $tot_used     = (uint64)0;
+  $tot_t        = (uint64)0;
+  $tot_switches = (uint64)0;
+  $i            = 0;
+  time("%H:%M:%S\n");
+  unroll(20)
+    {
+      if (@on_cpu[$i] > 0)
+	{
+	  $used = @on_cpu[$i];
+	  $switches = @ctx_switch[$i];
+	  $used_diff = $used - @last_on_cpu[$i];
+	  $switches_diff = $switches - @last_switches[$i];
+	  //printf("%d / %d  - %d\n", $used_diff, $t_diff, $switches_diff);
+
+	  $frac = 1000 * $used_diff / $t_diff;
+	  printf("CPU - %3d: %3d.%d%% | %5d context switches\n", $i, $frac / 10, $frac % 10, $switches_diff);
+
+	  @last_on_cpu[$i] = $used;
+	  @last_switches[$i] = $switches;
+	  $tot_used += $used_diff;
+	  $tot_t += $t_diff;
+	  $tot_switches += $switches_diff;
+	  $i += 1;
+	}
+    }
+  $frac = 1000 * $tot_used / $tot_t;
+  printf("CPU - All: %3d.%d%% | %5d context switches\n\n", $frac / 10, $frac % 10, $tot_switches);
+
+  @last_t = $t;
+}
+
+END
+{
+  $t = nsecs;
+  $t_diff = $t - @first_t;
+
+  $tot_used     = (uint64)0;
+  $tot_t        = (uint64)0;
+  $tot_switches = (uint64)0;
+  $i            = 0;
+  printf("\nAverage (since start of tracing)\n");
+  unroll(20)
+    {
+      if (@on_cpu[$i] > 0)
+	{
+	  $used = @on_cpu[$i];
+	  $switches = @ctx_switch[$i];
+
+	  $frac = 1000 * $used / $t_diff;
+	  printf("CPU - %3d: %3d.%d%% | %5d context switches\n", $i, $frac / 10, $frac % 10, $switches);
+
+	  $tot_used += $used;
+	  $tot_t += $t_diff;
+	  $tot_switches += $switches;
+	  $i += 1;
+	}
+    }
+  $frac = 1000 * $tot_used / $tot_t;
+  printf("CPU - All: %3d.%d%% | %5d context switches\n\n", $frac / 10, $frac % 10, $tot_switches);
+
+  clear(@start);
+  clear(@on_cpu);
+  clear(@last_on_cpu);
+  clear(@ctx_switch);
+  clear(@last_switches);
+  clear(@last_t);
+  clear(@first_t);
+}

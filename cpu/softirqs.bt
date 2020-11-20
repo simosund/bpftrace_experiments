@@ -1,0 +1,35 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+	@vec_map[0] = "hi";
+	@vec_map[1] = "timer";
+	@vec_map[2] = "net_tx";
+	@vec_map[3] = "net_rx";
+	@vec_map[4] = "block";
+	@vec_map[5] = "irq_poll";
+	@vec_map[6] = "tasklet";
+	@vec_map[7] = "sched";
+	@vec_map[8] = "hrtimer";
+	@vec_map[9] = "rcu";
+}
+
+tracepoint:irq:softirq_entry
+{
+	@start[cpu, args->vec] = nsecs;
+}
+
+tracepoint:irq:softirq_exit
+/@start[cpu, args->vec]/
+{
+	@usecs[@vec_map[args->vec]] = sum(nsecs - @start[cpu, args->vec]); // Actually stores it in nsecs, division when printing
+	delete(@start[cpu, args->vec])
+}
+
+END
+{
+	print(@usecs, 10, 1000);
+	clear(@start);
+	clear(@vec_map);
+	clear(@usecs);
+}

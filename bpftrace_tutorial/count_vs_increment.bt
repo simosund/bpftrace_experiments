@@ -1,0 +1,5 @@
+hardware:cache-misses:1000
+{
+	@a = count();
+	@b += 1;
+}

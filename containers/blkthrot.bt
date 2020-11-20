@@ -1,0 +1,28 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/cgroup-defs.h>
+#include <linux/blk-cgroup.h>
+
+BEGIN
+{
+  printf("Tracing block I/O throttles by cgroup\n");
+}
+
+kprobe:blk_throtl_bio
+{
+  @blkg[tid] = arg1;
+}
+
+kretprobe:blk_throtl_bio
+/@blkg[tid]/
+{
+  $blkg = (struct blkcg_gq *)@blkg[tid];
+  if (retval) {
+    @throttled[$blkg->blkcg->css.id] = count();
+  } else {
+    @notthrottled[$blkg->blkcg->css.id] = count();
+  }
+  delete(@blkg[tid]);
+}
+
+

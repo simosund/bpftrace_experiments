@@ -1,0 +1,14 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/fs.h>
+
+kprobe:add_to_page_cache_lru
+{
+  $as = (struct address_space *)arg1;
+  $mode = $as->host->i_mode;
+  // match block mode, uapi/linux/stat.h:
+  if ($mode & 0x6000)
+    {
+      @kb[comm] = sum(4);   // page size
+    }
+}

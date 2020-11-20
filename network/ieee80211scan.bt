@@ -1,0 +1,41 @@
+#!/usr/bin/env bpftrace
+
+#include <net/mac80211.h>
+
+BEGIN
+{
+  printf("Tracing ieee80211 SSID scans. Hit Ctrl-C to end.\n");
+  // from include/uapi/linux/n180211.h:
+  @band[0] = "2GHz";
+  @band[1] = "5GHz";
+  @band[2] = "60GHz";
+}
+
+kprobe:ieee80211_request_scan
+{
+  time("%H:%M:%S ");
+  printf("scan started (on CPU PID %d, %s)\n", pid, comm);
+  @start = nsecs;
+}
+
+kretprobe:ieee80211_get_channel
+/retval/
+{
+  $ch = (struct ieee80211_channel *)retval;
+  $band = 0xff & *retval; // $ch->band; workaround for #776
+  time("%H:%M:%S ");
+  printf("scanning channel %s freq %d: beacon found %d\n",
+	 @band[$band], $ch->center_freq, $ch->beacon_found);
+}
+
+kprobe:ieee80211_scan_completed
+/@start/
+{
+  time("%H:%M:%S ");
+  printf("scan completed: %d ms\n", (nsecs - @start) / 1000000);
+}
+
+END
+{
+  clear(@start); clear(@band);
+}

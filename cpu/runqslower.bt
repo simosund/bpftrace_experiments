@@ -1,0 +1,45 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/sched.h>
+
+BEGIN
+{
+	@tresh = (uint64)($1 > 0 ? $1 : 10000);
+	printf("Printing processes that have waited for more than %d us\n", @tresh);
+	printf("Hit Ctrl+C to end...\n");
+	printf("TIME     %-15s PID    LAT(us)\n", "COMM");
+}
+
+tracepoint:sched:sched_wakeup, tracepoint:sched:sched_wakeup_new
+{
+	if (args->pid > 0)
+	{
+		@qtime[args->pid] = nsecs;
+	}
+}
+
+tracepoint:sched:sched_switch
+{
+	if (args->prev_state == TASK_RUNNING && args->prev_pid > 0)
+	{
+		@qtime[args->prev_pid] = nsecs;
+	}
+
+	$start = @qtime[args->next_pid];
+	if ($start)
+	{
+		$lat = (nsecs - $start) / 1000;
+		@latencies = hist($lat);
+		if ($lat > @tresh)
+		{
+			time("%H:%M:%S ");
+			printf("%-15s %-5d  %5d\n", args->next_comm, args->next_pid, $lat);
+		}
+		delete(@qtime[args->next_pid]);
+	}
+}
+
+END
+{
+	clear(@qtime);
+}

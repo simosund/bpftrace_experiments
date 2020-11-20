@@ -1,0 +1,8 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_write
+/ pid == (uint64)$1 /
+{
+	printf("<%s> | %d\n", str(args->buf, args->count), args->count+1);
+}
+

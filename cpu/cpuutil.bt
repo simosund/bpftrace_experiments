@@ -1,0 +1,73 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("Estimates CPU-utalization per CPU. Hit Ctrl-C to stop...\n");
+  printf("Only prints out output for the first 20 cores (unroll limit)\n")
+}
+
+
+
+profile:hz:999
+{
+  @tot[cpu] += 1;
+  if (pid != 0)
+    {
+      @used[cpu] += 1;
+    }
+}
+
+interval:s:1
+{
+  $i = 0;
+  $tot_tot = (uint64)0;
+  $tot_used = (uint64)0;
+  time("%H:%M:%S\n");
+  unroll(20)
+    {
+      if (@tot[$i] > 0)
+	{
+	  $diff_tot = @tot[$i] - @last_tot[$i];
+	  $diff_used = @used[$i] - @last_used[$i];
+	  $frac = 1000 * $diff_used / $diff_tot;
+	  printf("CPU - %3d: %3d.%d%%\n", $i, $frac / 10, $frac % 10);
+
+	  @last_tot[$i] = @tot[$i];
+	  @last_used[$i] = @used[$i];
+	  $tot_used += $diff_used;
+	  $tot_tot += $diff_tot;
+	  $i += 1;
+	}
+    }
+  $frac = 1000 * $tot_used / $tot_tot;
+  printf("CPU - All: %3d.%d%%\n\n", $frac / 10, $frac % 10);
+}
+
+END
+{
+  $i = 0;
+  $tot_tot = (uint64)0;
+  $tot_used = (uint64)0;
+  printf("\nAverage:\n");
+  unroll(20)
+    {
+      if (@tot[$i] > 0)
+	{
+	  
+	  $frac = 1000 * @used[$i] / @tot[$i];
+	  printf("CPU - %3d: %3d.%d%%\n", $i, $frac / 10, $frac % 10);
+
+	  $tot_used += @used[$i];
+	  $tot_tot += @tot[$i];
+	  $i += 1;
+	}
+    }
+
+  $frac = 1000 * $tot_used / $tot_tot;
+  printf("CPU - All: %3d.%d%%\n\n", $frac / 10, $frac % 10);
+
+  clear(@tot);
+  clear(@used);
+  clear(@last_tot);
+  clear(@last_used);
+}

@@ -1,0 +1,20 @@
+#!/usr/bin/env bpftrace
+
+#include<linux/sched.h>
+#include<linux/fs.h>
+#include<linux/fdtable.h>
+
+tracepoint:syscalls:sys_enter_read
+{
+  $task = (struct task_struct *)curtask;
+  $file = (struct file*)*($task->files->fdt->fd + args->fd*8);
+  @junk[$file] = 0;
+  @filename[str($file->f_path.dentry->d_name.name)] = count();
+}
+
+// Cleanup of tmp bug workaround
+END
+{
+  clear(@junk);
+}
+

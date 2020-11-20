@@ -1,0 +1,71 @@
+#!/usr/bin/env bpftrace
+
+   /* A bpftrace of pping (passive ping). Prints out the RTT for each received packet
+    * Note that this uses a different approach than 
+    * Note that this is not the same approach as the original pping uses, which instead uses the TSval and TSecr values
+    */
+#include <linux/socket.h>
+#include <linux/in.h>
+#include <linux/in6.h>
+
+BEGIN
+{
+  printf("Cheating passive passive ping, Ctrl-C to stop\n");
+  //Dummy assignment to get compiler to guess correct type (will otherwise be none-type)
+  @rtt_min[ntop(0), 0, ntop(0), 0] = (uint64)1;
+}
+
+tracepoint:tcp:tcp_probe
+{
+  $t = elapsed;
+  $sadr = (struct sockaddr*)(args->saddr);
+  $dadr = (struct sockaddr*)(args->daddr);
+  $rtt_ms = args->srtt / 1000;
+  if ($sadr->sa_family == AF_INET) { //IPv4
+    $s = (struct sockaddr_in*)$sadr;
+    $d = (struct sockaddr_in*)$dadr;
+    /* if ($d->sin_addr.s_addr == 0x79dd049b) { //Skip my SSH connection */
+    /*   return; */ // error with unknown identifer return?
+    /* } */
+    $sadr_str = ntop(AF_INET, $s->sin_addr.s_addr);
+    $dadr_str = ntop(AF_INET, $d->sin_addr.s_addr);
+  } else { //AF_INET6 -> IPv6
+    $s6 = (struct sockaddr_in6*)$sadr;
+    $d6 = (struct sockaddr_in6*)$dadr;
+    $sadr_str = ntop(AF_INET, $s6->sin6_addr.in6_u.u6_addr8);
+    $dadr_str = ntop(AF_INET, $d6->sin6_addr.in6_u.u6_addr8);
+  }
+
+  @rtt[$sadr_str, args->sport, $dadr_str, args->dport] = lhist($rtt_ms, 0, 1000, 10);
+  // Keep track of minimum RTT for connection
+  // Would like to have used the min() here but can't do custom printing of values from those
+  $prev_min = @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport];
+  if ($prev_min == 0 || $rtt_ms < $prev_min) {
+    @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport] = $rtt_ms;
+    $min_rtt = $rtt_ms;
+  } else {
+    $min_rtt = $prev_min;
+  }
+
+  if ($rtt_ms > (uint64)$1) {
+    $min_rtt = @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport];
+    //printf("%4d.%09d ", $t / 1000000000, $t % 1000000000); //time since start of program in ns
+    time("%H:%M:%S ");  //wall clock time in s
+    printf("%d.%03d ms %d ms ", $rtt_ms, args->srtt % 1000, $min_rtt);
+    printf("%s:%d+%s:%d\n", $dadr_str, args->dport, $sadr_str, args->sport);
+    /* printf("%s:%d -> %s:%d, RTT: %d.%03d ms\n", $sadr_str, args->sport, */
+    /* 	   $dadr_str, args->dport, $rtt / 1000, $rtt % 1000); */
+  }
+}
+
+interval:s:2
+{
+  print(@rtt);
+  clear(@rtt);
+}
+
+END
+{
+  delete(@rtt_min[ntop(0), 0, ntop(0), 0]);
+} 
+

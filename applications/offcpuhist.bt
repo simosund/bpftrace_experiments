@@ -1,0 +1,29 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/sched.h>
+
+BEGIN
+{
+  printf("Tracing nanosecind time in off-CPU stacks. Ctlr-C to end\n");
+}
+
+kprobe:finish_task_switch
+{
+  // record previous thread sleep time
+  $prev = (struct task_struct *)arg0;
+  if ($1 == 0 || $prev->tgid == $1) {
+    @start[$prev->pid] = nsecs;
+  }
+
+  // get the current thread start time
+  $last = @start[tid];
+  if ($last != 0) {
+    @[kstack, ustack, comm, pid] = hist(nsecs - $last);
+    delete(@start[tid]);
+  }
+}
+
+END
+{
+  clear(@start);
+}

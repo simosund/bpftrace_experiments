@@ -1,0 +1,21 @@
+#!/usr/bin/env bpftrace
+
+   /* Version of tcpconnect.bt that uses the sock_inet_sock_set_state tracepoint instead */
+
+#include <net/tcp_states.h>
+#include <linux/socket.h>
+
+BEGIN
+{
+  printf("%-8s %-6s %-16s %-3s ", "TIME", "PID", "COMM", "IP");
+  printf("%-15s %-15s %-5s\n", "SADDR", "DADDR", "DPORT");
+}
+
+tracepoint:sock:inet_sock_set_state
+/(uint64)args->oldstate == TCP_CLOSE && (uint64)args->newstate == TCP_SYN_SENT/
+{
+  time("%H:%M:%S ");
+  printf("%-6d %-16s %-3d ", pid, comm, args->family == AF_INET ? 4 : 6);
+  printf("%-15s %-15s %-5d\n", ntop(args->family, args->saddr),
+	 ntop(args->family, args->daddr), args->dport);
+}

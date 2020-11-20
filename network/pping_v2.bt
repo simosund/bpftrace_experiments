@@ -1,0 +1,154 @@
+#!/usr/bin/env bpftrace
+
+#define MAX_OPTIONS 10
+
+#include <linux/in.h>
+   //#include <linux/in6.h>
+#include <linux/skbuff.h>
+#include <linux/netdevice.h>
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+   //#include <linux/ipv6.h>
+#include <linux/tcp.h>
+
+   /* This version is supposed to be a "proper" pping clone, aka tracking RTT using the TCP TSval
+    * instead of cheating and using the kernel-computed smoothed RTT as I did in the last one
+    *
+    * TODO: 
+    * - Clean out some debugging code
+    * - Add check for bi-directional flow (see pping source)
+    * - Add tracking of minimum RTT and histograms
+    */
+
+/* Record TSval on transmit */
+tracepoint:net:net_dev_start_xmit
+{
+  $skb = (struct sk_buff*)args->skbaddr;
+  //Parse IPv4-header
+  if (args->protocol == ETH_P_IP) { 
+    $iph = (struct iphdr *)($skb->head + $skb->network_header);
+    @ip_proto[$iph->protocol] = count();
+    //Parse TCP-header
+    if ($iph->protocol == IPPROTO_TCP) {
+      $tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+      $sport = ($tcph->source >> 8) | (($tcph->source << 8) & 0xff00);
+      $dport = ($tcph->dest >> 8) | (($tcph->dest << 8) & 0xff00);
+      @outflow[ ntop($iph->saddr), $sport, ntop($iph->daddr), $dport] = count();
+      @doff[$tcph->doff] = count();
+      if ($tcph->doff > 5) { //TCP header has options
+
+	/* Parsing the options looking for timestap
+	 * 
+	 * bpftrace does byte pointer arithmetic, will have to cast tcph to int8* otherwise
+	 */
+	$opttype = (int8 *)($tcph + sizeof(struct tcphdr)); //Pointer to option-type
+	$end = $tcph + ($tcph->doff << 2);  // Calculate end of TCP header here to avoid doing it in loop
+	$optcounter = 0;
+	while($optcounter < MAX_OPTIONS) {
+	  $optcounter++;
+	  if ($opttype >= $end || *$opttype == 0) {
+	    break;
+	  }
+	  if (*$opttype == 1) { // NOP Option - move to next byte
+	    $opttype = (int8 *)($opttype + 1);
+	    continue;
+	  }
+	  if (*$opttype == 8) { //Has timestamp
+	    $tsval = *(uint32)($opttype+2);
+	    //	    printf("%d\n", $tsval);
+	    // Record first occurance of TSval
+	    if ($tsval && !@start[$iph->saddr, $tcph->source,
+			       	  $iph->daddr, $tcph->dest, $tsval]) {
+	      @start[$iph->saddr, $tcph->source,
+		     $iph->daddr, $tcph->dest, $tsval] = nsecs;
+	    }
+	    break;
+	  }
+	  else { //Some other TCP option - Move ahead option-length bytes
+	    $opttype = (int8 *)($opttype + *($opttype+1));
+	  }
+	}
+	/* unroll(10) { */
+	/*   if (*$opttype > 0 && $opttype < $end) { */
+	/*     @tcpoptions[*$opttype] = count(); */
+	/*     if (*$opttype == 8) { //Has timestamp */
+	/*       @tsval = count(); */
+	/*       $tsval = *(uint32)($opttype+2); */
+	/*       // Record first occurance of TSval */
+	/*       if (@start[$iph->saddr, $tcph->source, */
+	/* 		 $iph->daddr, $tcph->dest, $tsval] == 0) { */
+	/* 	@start[$iph->saddr, $tcph->source, */
+	/* 	       $iph->daddr, $tcph->dest, $tsval] = nsecs; */
+	/*       } */
+	/*       //return; //break; */
+	/*     } */
+	/*     // Move to next option */
+	/*     if (*$opttype == 1) { //TCP NOP has no size, always 1 byte */
+	/*       $opttype = (int8 *)($opttype+1); */
+	/*     } */
+	/*     else { */
+	/*       $opttype = (int8 *)($opttype + *($opttype+1)); */
+	/*     } */
+	/*   } */
+	/* } */
+      }
+    }
+  }
+  @send[args->protocol] = count();
+}
+/* Check for matching TSecr on reply*/
+// Largely a copy-past of the transmit path, but can't use functions so...
+tracepoint:net:netif_receive_skb
+{
+  $skb = (struct sk_buff *)args->skbaddr;
+  $protocol = ($skb->protocol >> 8) | (($skb->protocol << 8) & 0xff00); //ntohs
+  // Parse IPv4-header
+  if ($protocol == ETH_P_IP) {
+    $iph = (struct iphdr *)($skb->head + $skb->network_header);
+    @recv_ipproto[$iph->protocol] = count();
+    //Parse TCP-header
+    if ($iph->protocol == IPPROTO_TCP) {
+      $tcph = (struct tcphdr *)($skb->head + $skb->transport_header);
+      $sport = ($tcph->source >> 8) | (($tcph->source << 8) & 0xff00);
+      $dport = ($tcph->dest >> 8) | (($tcph->dest << 8) & 0xff00);
+      @inflow[ ntop($iph->saddr), $sport, ntop($iph->daddr), $dport] = count();
+
+      if ($tcph->doff > 5) { //TCP header has options
+	$opttype = (int8 *)($tcph + sizeof(struct tcphdr)); //Pointer to option-type
+	$end = $tcph + ($tcph->doff << 2);  // Calculate end of TCP header here to avoid doing it in loop
+	$optcounter = 0;
+	while($optcounter < MAX_OPTIONS) {
+	  $optcounter++;
+	  if ($opttype >= $end || *$opttype == 0) {
+	    break;
+	  }
+	  if (*$opttype == 1) { // NOP Option - move to next byte
+	    $opttype = (int8 *)($opttype + 1);
+	    continue;
+	  }
+	  if (*$opttype == 8) { //Has timestamp
+	    $tsecr = *(uint32)($opttype+6);
+	    // Check if timestamp has been recorded, if so calculate RTT
+	    if ($tsecr && @start[$iph->daddr, $tcph->dest,
+				 $iph->saddr, $tcph->source, $tsecr]) {
+	      $rtt = nsecs - @start[$iph->daddr, $tcph->dest,
+				    $iph->saddr, $tcph->source, $tsecr];
+	      // Print RTT message
+	      if ($rtt / 1000000 > $1) {
+		time("%H:%M:%S ");
+		printf("%d ms %s:%d+%s:%d\n", $rtt / 1000000, ntop($iph->saddr), $sport,
+		       ntop($iph->daddr), $dport);
+	      }
+	      delete(@start[$iph->daddr, $tcph->dest, $iph->saddr, $tcph->source, $tsecr]);	
+	    } 
+	    break;
+	  }
+	  else { //Some other TCP option - Move ahead option-length bytes
+	    $opttype = (int8 *)($opttype + *($opttype+1));
+	  }
+	}
+      }
+    }
+  }
+}
+

@@ -1,0 +1,8 @@
+#!/usr/bin/env bpftrace
+
+#include <linux/sched.h>
+
+tracepoint:syscalls:sys_exit_execve
+{
+	printf("%-15s %-5d | %-15s %-5d | %-15s %-5d\n", comm, pid, curtask->comm, curtask->pid, curtask->parent->comm, curtask->parent->pid);
+} 

@@ -1,0 +1,33 @@
+#!/usr/bin/env bpftrace
+
+//Implements the suggested stable technique for getting filenames from the book for scread.bt
+
+tracepoint:syscalls:sys_enter_open, tracepoint:syscalls:sys_enter_openat
+{
+  @process_filename_map[tid] = str(args->filename);
+}
+
+tracepoint:syscalls:sys_exit_open, tracepoint:syscalls:sys_exit_openat
+/@process_filename_map[tid] != ""/
+{
+  $fd = args->ret;
+  if ($fd > 0)
+    {
+      @fd_map[pid, $fd] = @process_filename_map[tid];
+    }
+  delete(@process_filename_map[tid]);
+}
+
+
+tracepoint:syscalls:sys_enter_read
+{
+  $fname = @fd_map[pid, args->fd];
+  @filename[$fname != "" ? $fname : "unknown"] = count();
+}
+
+// Cleanup fd->filename maps
+END
+{
+  clear(@process_filename_map);
+  clear(@fd_map);
+}

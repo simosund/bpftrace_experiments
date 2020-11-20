@@ -1,0 +1,23 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("Tracing qdisk fq_codel latency. Hit Ctrl-C to end.\n");
+}
+
+kprobe:fq_codel_enqueue
+{
+  @start[arg0] = nsecs;
+}
+
+kretprobe:fq_codel_dequeue
+/@start[retval]/
+{
+  @us = hist((nsecs - @start[retval]) / 1000);
+  delete(@start[retval]);
+}
+
+END
+{
+  clear(@start);
+}

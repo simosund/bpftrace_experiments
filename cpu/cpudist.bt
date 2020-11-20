@@ -1,0 +1,42 @@
+#!/usr/bin/env bpftrace
+
+#include<linux/sched.h>
+
+tracepoint:sched:sched_switch
+{
+  $now = nsecs;
+  $prev = args->prev_pid;
+  $next = args->next_pid;
+
+  // On-CPU time (measured between pid was scheduled on until pid was scheduled off)
+  $prev_ts = @on_start[$prev];
+  if ($prev_ts && $prev_ts < $now && args->prev_state == TASK_RUNNING)
+    {
+      @on_usecs = hist(($now - $prev_ts)/1000);
+    }
+  delete(@on_start[$prev]);
+  @on_start[$next] = $now;
+
+  // Off-CPU time (measured between pid was scheduled off until pid was scheduled on again)
+  $prev_ts = @off_start[$next];
+  if ($prev_ts && $prev_ts < $now)
+    {
+      @off_usecs = hist(($now - $prev_ts)/1000);
+    }
+  delete(@off_start[$next]);
+  @off_start[$prev] = $now;
+  @BPF_overhead_usec = hist((nsecs - $now)/1000);
+}
+
+END
+{
+  print(@on_usecs);
+  print(@off_usecs);
+  print(@BPF_overhead_usec);
+  
+  clear(@on_usecs);
+  clear(@off_usecs);
+  clear(@BPF_overhead_usec);
+  clear(@on_start);
+  clear(@off_start);
+}

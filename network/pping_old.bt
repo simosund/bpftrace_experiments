@@ -1,0 +1,41 @@
+#!/usr/bin/env bpftrace
+
+   /* A bpftrace of pping (passive ping). Prints out the RTT for each received packet
+    * Note that this uses a different approach than 
+    * Note that this is not the same approach as the original pping uses, which instead uses the TSval and TSecr values
+    */
+#include <linux/socket.h>
+#include <linux/in.h>
+#include <linux/in6.h>
+
+tracepoint:tcp:tcp_probe
+{
+  $t = elapsed;
+  $sadr = (struct sockaddr*)(args->saddr);
+  $dadr = (struct sockaddr*)(args->daddr);
+  $rtt = args->srtt;
+  if ($sadr->sa_family == AF_INET) { //IPv4
+    $s = (struct sockaddr_in*)$sadr;
+    $d = (struct sockaddr_in*)$dadr;
+    @rtt[ntop(AF_INET, $s->sin_addr.s_addr), args->sport,
+	 ntop(AF_INET, $d->sin_addr.s_addr), args->dport] = hist($rtt);
+    if ($rtt/1000 > (uint64)$1 && $d->sin_addr.s_addr != 0x79dd049b ) { //Avoid my private IP from SSH
+      printf("%4d.%09d ", $t / 1000000000, $t % 1000000000);
+      printf("%s:%d -> %s:%d, RTT: %d.%03d ms\n", ntop(AF_INET, $s->sin_addr.s_addr), args->sport,
+	     ntop(AF_INET, $d->sin_addr.s_addr), args->dport, $rtt / 1000, $rtt % 1000);
+	
+    }
+  } else { //AF_INET6 -> IPv6
+    $s6 = (struct sockaddr_in6*)$sadr;
+    $d6 = (struct sockaddr_in6*)$dadr;
+    @rtt[ntop(AF_INET, $s6->sin6_addr.in6_u.u6_addr8), args->sport,
+	 ntop(AF_INET, $d6->sin6_addr.in6_u.u6_addr8), args->dport] = hist($rtt);
+    if ($rtt/1000 > (uint64)$1) {
+      printf("%4d.%09d ", $t / 1000000000, $t % 1000000000);
+      printf("%s:%d -> %s:%d, RTT: %d.%03d\n ms", ntop(AF_INET, $s6->sin6_addr.in6_u.u6_addr8), args->sport,
+	     ntop(AF_INET, $d6->sin6_addr.in6_u.u6_addr8), args->dport, $rtt / 1000, $rtt % 1000);
+    }
+  }
+}
+  
+

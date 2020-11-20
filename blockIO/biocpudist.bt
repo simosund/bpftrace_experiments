@@ -1,0 +1,11 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("Tracing block I/O completions per CPU. Hit Ctrl-C to end...\n");
+}
+
+tracepoint:block:block_rq_complete
+{
+  @cpu = lhist(cpu, 0, 1000, 1);
+}

@@ -1,0 +1,15 @@
+BEGIN
+{
+  $a = 1;              //a scratch-variable (local)
+  @b = 2;              //a map (global)
+  @c["key"] = "value"; //a key-value map (global)
+  @d["tuple", 3] = 17; //a key-value map with a sequence key
+  exit();
+}
+END
+{
+                                                   //$a does not exist
+  printf("%d\n", @b);                              //prints "2"
+  printf("<%s> %d\n", @c["key"], @d["tuple", 3]);  //prints "<value> 17"
+  printf("<%s> %d\n", @c["miss"], @d["tuple", 1]); //prints "<> 0"
+}

@@ -1,0 +1,10 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_write
+/ pid == (uint64)$1 /
+{
+	@tmp = args->count+1;
+	$test = @tmp;
+	printf("<%s> | %d\n", str(args->buf, $test-1), $test);
+}
+

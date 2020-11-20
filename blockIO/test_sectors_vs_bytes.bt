@@ -1,0 +1,12 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:block:block_rq_issue
+{
+  @bytes += args->bytes;
+  @sectors += args->nr_sector;
+}
+
+END
+{
+  printf("Bytes: %d, Sectorsx512: %d, Sectors %d\n", @bytes, @sectors * 512, @sectors);
+}

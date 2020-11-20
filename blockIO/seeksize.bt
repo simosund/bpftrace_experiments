@@ -1,0 +1,25 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("Tracing block I/O requested seeks... Hit Ctrl-C to end\n");
+}
+
+tracepoint:block:block_rq_issue
+{
+  if (@last[args->dev]) {
+    //calculate requested seek size
+    $last = @last[args->dev];
+    $dist = (args->sector - $last) > 0 ? args->sector - $last : $last - args->sector;
+
+    //store details
+    @sectors[args->comm] = hist($dist);
+  }
+  //save last requested position of disk head
+  @last[args->dev] = args->sector + args->nr_sector;
+}
+
+END
+{
+  clear(@last);
+}

@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:compaction:mm_compaction_begin { @start[tid] = nsecs; }
+tracepoint:compaction:mm_compaction_end /@start[tid]/
+{
+  $dur = nsecs - @start[tid];
+  @usec = hist($dur / 1000);
+  printf("Compaction event - duration %-5lu usec\n", $dur / 1000);
+  delete(@start[tid]);
+}
+
+END
+{
+  clear(@start);
+}

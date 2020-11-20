@@ -1,0 +1,27 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+	printf("Sampling CPU freq system-wide & per process. Ctrl-C to end\n");
+}
+
+tracepoint:power:cpu_frequency
+{
+	@curfreq[cpu] = args->state;
+	printf("Set CPU %d to frequency to %d MHz\n", cpu, args->state);
+}
+
+profile:hz:100
+/@curfreq[cpu]/
+{
+	@system_mhz = lhist(@curfreq[cpu] / 1000, 0, 5000, 200);
+	if (pid)
+	{
+		@process_mhz[comm] = lhist(@curfreq[cpu] / 1000, 0, 5000, 200);
+	}
+}
+
+END
+{
+	clear(@curfreq);
+}
