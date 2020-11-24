@@ -1,9 +1,14 @@
 #!/usr/bin/env bpftrace
 
    /* A bpftrace of pping (passive ping). Prints out the RTT for each received packet
-    * Note that this uses a different approach than 
-    * Note that this is not the same approach as the original pping uses, which instead uses the TSval and TSecr values
+    * Note that that this uses a different approach than the original  pping (by Pollere). 
+    * This one uses the smoothed RTT value calculated by the kernel for each received TCP packet.
+    * The advantage of this is that it's easy, works for all TCP packets (even if they lack the TCP 
+    * timestamp option) and should have somewhat lower overhead for mixed traffic (only triggers
+    * on TCP packets). The disadvatange is that the RTT is already smoothed (although can be
+    * reversed) and it will only work on the recipent of the TCP packets. 
     */
+
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/in6.h>
@@ -32,8 +37,8 @@ tracepoint:tcp:tcp_probe
 	 ntop(AF_INET, $d6->sin6_addr.in6_u.u6_addr8), args->dport] = hist($rtt);
     if ($rtt/1000 > (uint64)$1) {
       printf("%4d.%09d ", $t / 1000000000, $t % 1000000000);
-      printf("%s:%d -> %s:%d, RTT: %d.%03d\n ms", ntop(AF_INET, $s6->sin6_addr.in6_u.u6_addr8), args->sport,
-	     ntop(AF_INET, $d6->sin6_addr.in6_u.u6_addr8), args->dport, $rtt / 1000, $rtt % 1000);
+      printf("%s:%d -> %s:%d, RTT: %d.%03d\n ms", ntop(AF_INET6, $s6->sin6_addr.in6_u.u6_addr8), args->sport,
+	     ntop(AF_INET6, $d6->sin6_addr.in6_u.u6_addr8), args->dport, $rtt / 1000, $rtt % 1000);
     }
   }
 }

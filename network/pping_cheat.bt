@@ -1,0 +1,106 @@
+#!/usr/bin/env bpftrace
+
+   /* A bpftrace of pping (passive ping). Prints out the RTT for each received packet
+    * Note that that this uses a different approach than the original  pping (by Pollere). 
+    * This one uses the smoothed RTT value calculated by the kernel for each received TCP packet,
+    * although by keeping track of the previous smoothed rtt value this smoothing is undone.
+    * The advantage of this is that it's easy, works for all TCP packets (even if they lack the TCP 
+    * timestamp option) and should have somewhat lower overhead for mixed traffic (only triggers
+    * on TCP packets). The disadvatange is that the RTT is already smoothed (although can be
+    * reversed) and it will only work on the recipent of the TCP packets. 
+    *
+    * This one has some additional features compared to the old one:
+    * - Will only print out lines where the RTT exceedes the value given by the first 
+    *  command line argument (in ms)
+    * - Will keep track of the minimum RTT for each flow
+    * - Will create a histogram over the RTT for each flow
+    */
+
+#include <linux/socket.h>
+#include <linux/in.h>
+#include <linux/in6.h>
+
+BEGIN
+{
+  printf("Cheating passive passive ping, Ctrl-C to stop\n");
+  //Dummy assignment to get compiler to guess correct type (will otherwise be none-type)
+  @prev_srtt[ntop(0), 0, ntop(0), 0] = (uint32)1;
+  @rtt_min[ntop(0), 0, ntop(0), 0] = (uint32)1;
+}
+
+tracepoint:tcp:tcp_probe
+{
+  $t = elapsed;
+  $sadr = (struct sockaddr*)(args->saddr);
+  $dadr = (struct sockaddr*)(args->daddr);
+  $srtt = args->srtt;
+  // IPv4
+  if ($sadr->sa_family == AF_INET) {
+    $s = (struct sockaddr_in*)$sadr;
+    $d = (struct sockaddr_in*)$dadr;
+    /* if ($d->sin_addr.s_addr == 0x79dd049b) { //Skip my SSH connection */
+    /*   return; */ // error with unknown identifer return?
+    /* } */
+    $sadr_str = ntop(AF_INET, $s->sin_addr.s_addr);
+    $dadr_str = ntop(AF_INET, $d->sin_addr.s_addr);
+    //AF_INET6 -> IPv6
+  } else { 
+    $s6 = (struct sockaddr_in6*)$sadr;
+    $d6 = (struct sockaddr_in6*)$dadr;
+    $sadr_str = ntop(AF_INET6, $s6->sin6_addr.in6_u.u6_addr8);
+    $dadr_str = ntop(AF_INET6, $d6->sin6_addr.in6_u.u6_addr8);
+  }
+
+  // Un-smooth the RTT to get the actual measured RTT
+  /* In kernel, smoothed rtt is calculated as:
+   *   srtt_next = srtt + 1/8*(m - srtt), where m is the measured RTT 
+   * So reverse it as m = 8*srtt_next - 7*srtt
+   */
+  $prev_srtt = @prev_srtt[$sadr_str, args->sport, $dadr_str, args->dport];
+  if ($prev_srtt == 0) {
+    $rtt = $srtt;
+  } else {
+    $rtt = ($srtt << 3) - (7 * $prev_srtt);
+  }
+  @prev_srtt[$sadr_str, args->sport, $dadr_str, args->dport] = $srtt;
+
+  // Histogram with 5ms resolution for each flow
+  @rtt_hist[$sadr_str, args->sport, $dadr_str, args->dport] = lhist($rtt / 1000, 0, 1000, 5); 
+
+  // Keep track of minimum RTT per flow
+  // Would like to have used  min() here but can't do custom printing of values from those
+  $prev_min = @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport];
+  if ($prev_min == 0 || $rtt < $prev_min) {
+    @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport] = $rtt;
+    $min_rtt = $rtt;
+  } else {
+    $min_rtt = $prev_min;
+  }
+
+  // Print line with RTT
+  if ($rtt / 1000 > (uint64)$1) {
+    $min_rtt = @rtt_min[$sadr_str, args->sport, $dadr_str, args->dport];
+    //printf("%4d.%09d ", $t / 1000000000, $t % 1000000000); //time since start of program in ns
+    time("%H:%M:%S ");  //wall clock time in s
+    printf("%d.%03d ms %d.%03d ms ", $rtt / 1000, $rtt % 1000, $min_rtt / 1000, $min_rtt % 1000);
+    printf("%s:%d+%s:%d\n", $dadr_str, args->dport, $sadr_str, args->sport);
+  }
+}
+
+/* interval:s:10 */
+/* { */
+/*   print(@rtt); */
+/*   clear(@rtt); */
+/* } */
+
+END
+{
+  print(@rtt_hist);
+  delete(@rtt_min[ntop(0), 0, ntop(0), 0]);
+  print(@rtt_min, 100, 1000);
+  
+  clear(@rtt_hist);
+  clear(@rtt_min);
+  clear(@prev_srtt);
+} 
+
