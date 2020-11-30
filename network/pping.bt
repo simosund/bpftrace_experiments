@@ -12,7 +12,12 @@
 #include <linux/tcp.h>
 
    /* This version is supposed to be a "proper" pping clone, aka tracking RTT using the TCP TSval
-    * instead of cheating and using the kernel-computed smoothed RTT as I did in pping_cheat.bt
+    * instead of cheating and using the kernel-computed RTT from the TCP stack as I did in pping_cheat.bt
+    *
+    * REQUIREMENTS: Unlike the previous tools I've done this one requires a more recent version of bpftrace,
+    * as it makes use of (bounded) while loops and the sizeof function that were introduced in v0.11.0,
+    * as well as return and dereferencing of pointers which I don't seem to be available in version 0.9.4 at least.
+    * I have personally used the docker image of bpftrace v0.11.4 when using it.
     *
     * TODO: 
     * - Add tracking of minimum RTT and histograms
@@ -71,7 +76,7 @@ tracepoint:net:net_dev_start_xmit
     }
     if (*$opttype == 8) { //Has timestamp
       $tsval = *(uint32)($opttype+2);
-      if ($tsval &&  // Only add timestamp first time it's seen
+      if ($tsval &&  // Only add timestamp first time it's seen for the flow
 	  !@start[$saddr, $sport,$daddr, $dport, $tsval] &&
 	  !@used_ts[$saddr, $sport, $daddr, $dport, $tsval]) {
 	@start[$saddr, $sport,
@@ -161,6 +166,9 @@ tracepoint:net:netif_receive_skb
 
 interval:s:10
 {
+  // Can't loop through map to only clear used TS-values that are older than 10s like in original pping
+  // Simply clears all used TS every 10s, so TS that were added just before this clear could potentially be
+  // reused which could potentially lead to a too short RTT being reported
   clear(@used_ts);
 }
 

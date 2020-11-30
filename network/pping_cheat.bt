@@ -11,9 +11,10 @@
     *
     * This one has some additional features compared to the old one:
     * - Will only print out lines where the RTT exceedes the value given by the first 
-    *  command line argument (in ms)
-    * - Will keep track of the minimum RTT for each flow
-    * - Will create a histogram over the RTT for each flow
+    *  command line argument (in ms), if not provided will report all RTTs >= 1 ms
+    * - Will keep track of the minimum RTT for each flow (will be printed out as in original
+    *   pping as well as in map at end of program)
+    * - Will create a histogram over the RTT for each flow (shown at end of program)
     */
 
 #include <linux/socket.h>
@@ -52,7 +53,7 @@ tracepoint:tcp:tcp_probe
   }
 
   // Un-smooth the RTT to get the actual measured RTT
-  /* In kernel, smoothed rtt is calculated as:
+  /* In kernel, smoothed rtt is calculated by tcp_rtt_estimator as:
    *   srtt_next = srtt + 1/8*(m - srtt), where m is the measured RTT 
    * So reverse it as m = 8*srtt_next - 7*srtt
    */
@@ -89,8 +90,8 @@ tracepoint:tcp:tcp_probe
 
 /* interval:s:10 */
 /* { */
-/*   print(@rtt); */
-/*   clear(@rtt); */
+/*   print(@rtt_hist); */
+/*   clear(@rtt_hist); */
 /* } */
 
 END
