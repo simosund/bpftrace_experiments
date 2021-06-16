@@ -1,0 +1,43 @@
+#!/usr/bin/env bpftrace
+
+   /*
+    * Captures the distribution of the inter-packet time for both tx and rx.
+    *
+    * Usage: interpkttime.bt <dev>
+    */
+
+#include <linux/skbuff.h>
+#include <linux/netdevice.h>
+
+BEGIN
+{
+	printf("Tracking inter-packet time on dev %s. Hit Ctrl-C to end...\n", str($1));
+}
+
+t:net:net_dev_start_xmit
+/ ((struct sk_buff *)args->skbaddr)->dev->name == str($1) /
+{
+	$t = nsecs;
+	$prev_t = @last_tx;
+	if ($prev_t && $prev_t < $t) {
+		@tx_interpkt_ns = hist($t - $prev_t);
+	}
+	@last_tx = $t;
+}
+
+t:net:netif_receive_skb
+/ ((struct sk_buff *)args->skbaddr)->dev->name == str($1) /
+{
+	$t = nsecs;
+	$prev_t = @last_rx;
+	if ($prev_t && $prev_t < $t) {
+		@rx_interpkt_ns = hist($t - $prev_t);
+	}
+	@last_rx = $t;
+}
+
+END
+{
+	clear(@last_tx);
+	clear(@last_rx);
+}
